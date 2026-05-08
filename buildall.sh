@@ -8,5 +8,8 @@ njobs=$(nproc)
 
 pushd f3dex2
 ./build_libdragon.sh
+pushd f3dex2_ucode
+./build.sh
+popd
 make -j${njobs}
 popd
