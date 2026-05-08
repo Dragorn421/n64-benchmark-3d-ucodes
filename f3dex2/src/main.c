@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Dragorn421
 // SPDX-License-Identifier: CC0-1.0
 
+#include <stdint.h>
+#include <stdlib.h>
+
 #include <libdragon.h>
 
 #define F3DEX_GBI_2
@@ -11,7 +14,9 @@
 #define SCREEN_WIDTH 320
 #define SCREEN_HEIGHT 240
 
-alignas(16) Gfx workBuffer[1000];
+struct GfxCtx {
+  alignas(16) Gfx workBuffer[1000];
+};
 
 void set_mtx_scale(Mtx *mtx, float scale) {
   int32_t scale_fixed = scale * 0x10000;
@@ -30,6 +35,10 @@ int main() {
 
   display_init((resolution_t){SCREEN_WIDTH, SCREEN_HEIGHT}, DEPTH_16_BPP, 2,
                GAMMA_NONE, FILTERS_RESAMPLE_ANTIALIAS_DEDITHER);
+
+  struct GfxCtx *gfx_ctx_buf =
+      aligned_alloc(16, sizeof(struct GfxCtx) * display_get_num_buffers());
+  int next_gfx_ctx_i = 0;
 
   f3dex2_exec_init();
 
@@ -58,7 +67,11 @@ int main() {
   while (true) {
     surface_t *surf = display_get();
 
-    Gfx *work = workBuffer;
+    struct GfxCtx *gfx_ctx = &gfx_ctx_buf[next_gfx_ctx_i];
+    next_gfx_ctx_i++;
+    next_gfx_ctx_i %= display_get_num_buffers();
+
+    Gfx *work = gfx_ctx->workBuffer;
 
     gDPSetScissor(work++, G_SC_NON_INTERLACE, 0, 0, SCREEN_WIDTH,
                   SCREEN_HEIGHT);
@@ -96,6 +109,6 @@ int main() {
 
     gSPEndDisplayList(work++);
 
-    f3dex2_exec_task(workBuffer, work, (void *)display_show, surf);
+    f3dex2_exec_task(gfx_ctx->workBuffer, work, (void *)display_show, surf);
   }
 }
