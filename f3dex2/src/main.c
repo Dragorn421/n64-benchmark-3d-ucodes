@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Dragorn421
 // SPDX-License-Identifier: CC0-1.0
 
+#include <stdalign.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -18,6 +19,11 @@ struct GfxCtx {
   alignas(16) Gfx workBuffer[1000];
 };
 
+struct RuntimeGeoCtx {
+  Gfx dl[5000];
+  Vtx verts[20000];
+};
+
 void set_mtx_scale(Mtx *mtx, float scale) {
   int32_t scale_fixed = scale * 0x10000;
   uint16_t scale_int = (scale_fixed >> 16) & 0xFFFF;
@@ -28,17 +34,60 @@ void set_mtx_scale(Mtx *mtx, float scale) {
       mtx->fracPart[j][i] = i == j ? scale_frac : 0;
     }
   }
+  mtx->intPart[3][3] = 1;
+  mtx->fracPart[3][3] = 0;
+}
+
+#define VTX(x, y, z, s, t, crnx, cgny, cbnz, a)                                \
+  {                                                                            \
+    {                                                                          \
+      {x, y, z}, 0, {s, t}, { crnx, cgny, cbnz, a }                            \
+    }                                                                          \
+  }
+
+void push_vtx(Vtx **verts_p, int16_t x, int16_t y) {
+  **verts_p = (Vtx)VTX(x, y, 0, 0, 0, 0, 0, 0, 0);
+  (*verts_p)++;
+}
+
+void generate_geometry(struct RuntimeGeoCtx *runtime_geo_ctx, int load_amount) {
+  Gfx *dl = runtime_geo_ctx->dl;
+  Vtx *verts_p = runtime_geo_ctx->verts;
+
+  gDPSetCycleType(dl++, G_CYC_1CYCLE);
+  gDPSetRenderMode(dl++, G_RM_OPA_SURF, G_RM_OPA_SURF2);
+  gDPSetCombineMode(dl++, G_CC_PRIMITIVE, G_CC_PRIMITIVE);
+  gDPSetPrimColor(dl++, 0, 0, 255, 255, 255, 255);
+  gSPLoadGeometryMode(dl++, 0);
+
+  push_vtx(&verts_p, 0, -1024);
+  push_vtx(&verts_p, -1024, 1024);
+  push_vtx(&verts_p, 1024, 1024);
+
+  gSPVertex(dl++, runtime_geo_ctx->verts, 3, 0);
+  gSP1Triangle(dl++, 0, 1, 2, 0);
+
+  gSPEndDisplayList(dl++);
 }
 
 int main() {
   debug_init_isviewer();
 
+  joypad_init();
+
   display_init((resolution_t){SCREEN_WIDTH, SCREEN_HEIGHT}, DEPTH_16_BPP, 2,
                GAMMA_NONE, FILTERS_RESAMPLE_ANTIALIAS_DEDITHER);
 
   struct GfxCtx *gfx_ctx_buf =
-      aligned_alloc(16, sizeof(struct GfxCtx) * display_get_num_buffers());
+      aligned_alloc(alignof(struct GfxCtx),
+                    sizeof(struct GfxCtx) * display_get_num_buffers());
   int next_gfx_ctx_i = 0;
+  // We don't necessarily change RuntimeGeoCtx every frame, but it is possible,
+  // hence N-buffering
+  struct RuntimeGeoCtx *runtime_geo_ctx_buf =
+      aligned_alloc(alignof(struct RuntimeGeoCtx),
+                    sizeof(struct RuntimeGeoCtx) * display_get_num_buffers());
+  int next_runtime_geo_ctx_i = 0;
 
   f3dex2_exec_init();
 
@@ -50,21 +99,35 @@ int main() {
   set_mtx_scale(&projMtx, 1.0f);
   data_cache_hit_writeback(&projMtx, sizeof(projMtx));
   static Mtx modelViewMtx;
-  set_mtx_scale(&modelViewMtx, 1.0f);
+  set_mtx_scale(&modelViewMtx, 1.0f / 1024);
   data_cache_hit_writeback(&modelViewMtx, sizeof(modelViewMtx));
-#define VTX(x, y, z, s, t, crnx, cgny, cbnz, a)                                \
-  {                                                                            \
-    {                                                                          \
-      {x, y, z}, 0, {s, t}, { crnx, cgny, cbnz, a }                            \
-    }                                                                          \
-  }
-  static Vtx verts[] = {
-      VTX(0, -1, 0, 0, 0, 0, 0, 0, 0),
-      VTX(-1, 1, 0, 0, 0, 0, 0, 0, 0),
-      VTX(1, 1, 0, 0, 0, 0, 0, 0, 0),
-  };
+
+  int load_amount = 1;
+  struct RuntimeGeoCtx *runtime_geo_ctx = NULL;
 
   while (true) {
+    joypad_poll();
+
+    joypad_buttons_t input = joypad_get_buttons(JOYPAD_PORT_1);
+    if (input.d_up) {
+      load_amount *= 2;
+      runtime_geo_ctx = NULL;
+    }
+    if (input.d_down) {
+      load_amount /= 2;
+      if (load_amount < 1) {
+        load_amount = 1;
+      }
+      runtime_geo_ctx = NULL;
+    }
+
+    if (runtime_geo_ctx == NULL) {
+      runtime_geo_ctx = &runtime_geo_ctx_buf[next_runtime_geo_ctx_i];
+      next_runtime_geo_ctx_i++;
+      next_runtime_geo_ctx_i %= display_get_num_buffers();
+      generate_geometry(runtime_geo_ctx, load_amount);
+    }
+
     surface_t *surf = display_get();
 
     struct GfxCtx *gfx_ctx = &gfx_ctx_buf[next_gfx_ctx_i];
@@ -96,14 +159,7 @@ int main() {
     gSPMatrix(work++, &modelViewMtx,
               G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
 
-    gDPSetCycleType(work++, G_CYC_1CYCLE);
-    gDPSetRenderMode(work++, G_RM_OPA_SURF, G_RM_OPA_SURF2);
-    gDPSetCombineMode(work++, G_CC_PRIMITIVE, G_CC_PRIMITIVE);
-    gDPSetPrimColor(work++, 0, 0, 255, 255, 255, 255);
-    gSPLoadGeometryMode(work++, 0);
-
-    gSPVertex(work++, verts, 3, 0);
-    gSP1Triangle(work++, 0, 1, 2, 0);
+    gSPDisplayList(work++, runtime_geo_ctx->dl);
 
     gDPFullSync(work++);
 
