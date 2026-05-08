@@ -1,3 +1,9 @@
 [submodule "f3dex2/libdragon"]
 	path = f3dex2/libdragon
 	url = git@github.com:DragonMinded/libdragon.git
+[submodule "f3dex2/f3dex2_ucode/f3dex2"]
+	path = f3dex2/f3dex2_ucode/f3dex2
+	url = git@github.com:Mr-Wiseguy/f3dex2.git
+[submodule "f3dex2/f3dex2_ucode/armips"]
+	path = f3dex2/f3dex2_ucode/armips
+	url = git@github.com:Kingcom/armips.git
