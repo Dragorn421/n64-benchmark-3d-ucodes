@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Dragorn421
 // SPDX-License-Identifier: CC0-1.0
 
+#include <limits.h>
 #include <stdalign.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -12,6 +13,8 @@
 
 #include "f3dex2_exec.h"
 
+#define ARRAY_COUNT(arr) (s32)(sizeof(arr) / sizeof(arr[0]))
+
 #define SCREEN_WIDTH 320
 #define SCREEN_HEIGHT 240
 
@@ -20,8 +23,8 @@ struct GfxCtx {
 };
 
 struct RuntimeGeoCtx {
-  Gfx dl[5000];
-  Vtx verts[20000];
+  Gfx dl[40000];
+  Vtx verts[60000];
 };
 
 void set_mtx_scale(Mtx *mtx, float scale) {
@@ -50,9 +53,19 @@ void push_vtx(Vtx **verts_p, int16_t x, int16_t y) {
   (*verts_p)++;
 }
 
-void generate_geometry(struct RuntimeGeoCtx *runtime_geo_ctx, int load_amount) {
+void generate_geometry(struct RuntimeGeoCtx *runtime_geo_ctx,
+                       unsigned int load_amount) {
   Gfx *dl = runtime_geo_ctx->dl;
   Vtx *verts_p = runtime_geo_ctx->verts;
+
+  debugf("generate_geometry %u\n", load_amount);
+  unsigned int max_load_amount =
+      MIN((ARRAY_COUNT(runtime_geo_ctx->dl) - 10) / 2,
+          ARRAY_COUNT(runtime_geo_ctx->verts) / 3);
+  if (load_amount > max_load_amount) {
+    debugf("  load_amount clamped to %d\n", max_load_amount);
+    load_amount = max_load_amount;
+  }
 
   gDPSetCycleType(dl++, G_CYC_1CYCLE);
   gDPSetRenderMode(dl++, G_RM_OPA_SURF, G_RM_OPA_SURF2);
@@ -60,12 +73,17 @@ void generate_geometry(struct RuntimeGeoCtx *runtime_geo_ctx, int load_amount) {
   gDPSetPrimColor(dl++, 0, 0, 255, 255, 255, 255);
   gSPLoadGeometryMode(dl++, 0);
 
-  push_vtx(&verts_p, 0, -1024);
-  push_vtx(&verts_p, -1024, 1024);
-  push_vtx(&verts_p, 1024, 1024);
+  float dx = (float)2048 / load_amount;
+  for (int i = 0; i < load_amount; i++) {
+    gSPVertex(dl++, verts_p, 3, 0);
+    gSP1Triangle(dl++, 0, 1, 2, 0);
 
-  gSPVertex(dl++, runtime_geo_ctx->verts, 3, 0);
-  gSP1Triangle(dl++, 0, 1, 2, 0);
+    int x = -1024 + dx * i;
+
+    push_vtx(&verts_p, (int16_t)(x + dx / 2), -1024);
+    push_vtx(&verts_p, x, 1024);
+    push_vtx(&verts_p, MAX((int16_t)(x + dx), x + 1), 1024);
+  }
 
   gSPEndDisplayList(dl++);
 }
@@ -102,7 +120,7 @@ int main() {
   set_mtx_scale(&modelViewMtx, 1.0f / 1024);
   data_cache_hit_writeback(&modelViewMtx, sizeof(modelViewMtx));
 
-  int load_amount = 1;
+  unsigned int load_amount = 1;
   struct RuntimeGeoCtx *runtime_geo_ctx = NULL;
 
   while (true) {
@@ -111,6 +129,9 @@ int main() {
     joypad_buttons_t input = joypad_get_buttons(JOYPAD_PORT_1);
     if (input.d_up) {
       load_amount *= 2;
+      if (load_amount < 1) {
+        load_amount = UINT_MAX;
+      }
       runtime_geo_ctx = NULL;
     }
     if (input.d_down) {
