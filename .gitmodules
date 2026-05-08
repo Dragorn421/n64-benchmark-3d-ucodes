@@ -1,0 +1,3 @@
+[submodule "f3dex2/libdragon"]
+	path = f3dex2/libdragon
+	url = git@github.com:DragonMinded/libdragon.git
