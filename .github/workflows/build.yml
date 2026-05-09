@@ -5,19 +5,21 @@ on: [push, pull_request]
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/dragonminded/libdragon:latest
 
     steps:
+
+    - name: Install dependencies
+      run: |
+        apt-get update
+        apt-get install -y cmake
+
     - uses: actions/checkout@v6
       with:
         submodules: recursive
 
-    - name: Install N64 toolchain
-      run: |
-        curl -L -o gcc-toolchain-mips64-x86_64.deb https://github.com/DragonMinded/libdragon/releases/download/toolchain-continuous-prerelease/gcc-toolchain-mips64-x86_64.deb
-        sudo apt-get install build-essential
-        sudo dpkg -i gcc-toolchain-mips64-x86_64.deb
-
-    - run: N64_GCCPREFIX=/opt/libdragon ./buildall.sh
+    - run: N64_GCCPREFIX=/n64_toolchain ./buildall.sh
 
     - name: Upload benchmark3d_f3dex2.z64
       uses: actions/upload-artifact@v7
