@@ -7,3 +7,9 @@
 [submodule "f3dex2/f3dex2_ucode/armips"]
 	path = f3dex2/f3dex2_ucode/armips
 	url = git@github.com:Kingcom/armips.git
+[submodule "tiny3d/libdragon"]
+	path = tiny3d/libdragon
+	url = git@github.com:DragonMinded/libdragon.git
+[submodule "tiny3d/tiny3d"]
+	path = tiny3d/tiny3d
+	url = git@github.com:HailToDodongo/tiny3d.git
