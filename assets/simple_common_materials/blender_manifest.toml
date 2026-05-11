@@ -1,0 +1,18 @@
+schema_version = "1.0.0"
+
+id = "simple_common_materials"
+version = "0.0.1"
+name = "Simple Common Materials"
+tagline = "Simple material props that can be lowered to other addons' props"
+maintainer = "Dragorn421"
+type = "add-on"
+
+website = "https://github.com/Dragorn421/n64-benchmark-3d-ucodes"
+
+tags = ["Material"]
+
+# Note: the only version actually tested is 4.5.9
+blender_version_min = "4.2.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+copyright = ["2026 Dragorn421"]

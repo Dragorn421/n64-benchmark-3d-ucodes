@@ -17,7 +17,23 @@ jobs:
         sudo apt-get install build-essential
         sudo dpkg -i gcc-toolchain-mips64-x86_64.deb
 
-    - run: N64_GCCPREFIX=/opt/libdragon ./buildall.sh
+    - name: Download and extract Blender
+      run: |
+        curl -o blender-4.5.9-linux-x64.tar.xz https://download.blender.org/release/Blender4.5/blender-4.5.9-linux-x64.tar.xz
+        tar -xJvf blender-4.5.9-linux-x64.tar.xz
+
+    - name: Install simple_common_materials
+      run: |
+        blender-4.5.9-linux-x64/blender --command extension build --source-dir assets/simple_common_materials --output-filepath simple_common_materials.zip
+        blender-4.5.9-linux-x64/blender --command extension install-file --repo user_default --enable simple_common_materials.zip
+
+    - name: Download and install DragEx
+      run: |
+        curl -L -o dragex-cp311-manylinux_x86_64-v0.0.1.zip https://github.com/Dragorn421/DragEx/releases/download/v0.0.1/dragex-cp311-manylinux_x86_64-v0.0.1.zip
+        blender-4.5.9-linux-x64/blender --command extension install-file --repo user_default --enable dragex-cp311-manylinux_x86_64-v0.0.1.zip
+
+    - name: Build
+      run: N64_GCCPREFIX=/opt/libdragon BLENDER_4_5=$(realpath blender-4.5.9-linux-x64/blender) ./buildall.sh
 
     - name: Upload benchmark3d_f3dex2.z64
       uses: actions/upload-artifact@v7

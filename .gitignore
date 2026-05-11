@@ -1,6 +1,11 @@
 build
 *.z64
 
+*.blend1
+
+.venv
+__pycache__
+
 .cache
 .clangd
 compile_commands.json

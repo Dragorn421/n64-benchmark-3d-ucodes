@@ -29,6 +29,22 @@ $(BUILD_DIR)/src/f3dex2.o: f3dex2_ucode/f3dex2/build/F3DZEX_NoN_2.08J/F3DZEX_NoN
 
 $(ROMNAME).z64: N64_ROM_TITLE = $(ROM_TITLE)
 
+define suzanne100Kbin
+ifeq ($$(wildcard assets/build/Suzanne100K/$(1)),)
+  $$(error You must first build the assets by running cd assets && make)
+endif
+$$(BUILD_DIR)/dfs/$(1): assets/build/Suzanne100K/$(1)
+	mkdir -p $$(@D)
+	cp $$< $$@
+$$(BUILD_DIR)/dfs.dfs: $$(BUILD_DIR)/dfs/$(1)
+endef
+
+$(eval $(call suzanne100Kbin,Suzanne1K.bin))
+$(eval $(call suzanne100Kbin,Suzanne10K.bin))
+$(eval $(call suzanne100Kbin,Suzanne50K.bin))
+N64_MKDFS_ROOT := $(BUILD_DIR)/dfs
+$(ROMNAME).z64: $(BUILD_DIR)/dfs.dfs
+
 $(BUILD_DIR)/$(ROMNAME).elf: $(OBJS)
 $(BUILD_DIR)/$(ROMNAME).elf: N64_C_AND_CXX_FLAGS += -D_LANGUAGE_C
 

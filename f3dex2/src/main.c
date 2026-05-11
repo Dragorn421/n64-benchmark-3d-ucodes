@@ -18,14 +18,39 @@
 #define SCREEN_WIDTH 320
 #define SCREEN_HEIGHT 240
 
-struct GfxCtx {
-  alignas(16) Gfx workBuffer[1000];
+alignas(16) uint16_t zbuffer[SCREEN_HEIGHT][SCREEN_WIDTH];
+
+struct on_task_finished_arg_data {
+  surface_t *surf;
+  int i_used_loaded_model;
 };
 
-struct RuntimeGeoCtx {
-  Gfx dl[40000];
-  Vtx verts[60000];
+struct GfxCtx {
+  alignas(16) Gfx workBuffer[1000];
+  struct on_task_finished_arg_data on_task_finished_arg_data;
 };
+
+struct loaded_model {
+  bool is_loaded;
+  void *data;
+  int n_users;
+};
+struct loaded_model loaded_models[3] = {0};
+int i_cur_loaded_model;
+
+void on_task_finished(void *callback_arg) {
+  struct on_task_finished_arg_data *arg = callback_arg;
+  display_show(arg->surf);
+  struct loaded_model *used_model = &loaded_models[arg->i_used_loaded_model];
+  assert(used_model->n_users > 0);
+  used_model->n_users--;
+  if (used_model->n_users == 0 &&
+      arg->i_used_loaded_model != i_cur_loaded_model) {
+    used_model->is_loaded = false;
+    free(used_model->data);
+    used_model->data = NULL;
+  }
+}
 
 void set_mtx_scale(Mtx *mtx, float scale) {
   int32_t scale_fixed = scale * 0x10000;
@@ -41,53 +66,6 @@ void set_mtx_scale(Mtx *mtx, float scale) {
   mtx->fracPart[3][3] = 0;
 }
 
-#define VTX(x, y, z, s, t, crnx, cgny, cbnz, a)                                \
-  {                                                                            \
-    {                                                                          \
-      {x, y, z}, 0, {s, t}, { crnx, cgny, cbnz, a }                            \
-    }                                                                          \
-  }
-
-void push_vtx(Vtx **verts_p, int16_t x, int16_t y) {
-  **verts_p = (Vtx)VTX(x, y, 0, 0, 0, 0, 0, 0, 0);
-  (*verts_p)++;
-}
-
-void generate_geometry(struct RuntimeGeoCtx *runtime_geo_ctx,
-                       unsigned int load_amount) {
-  Gfx *dl = runtime_geo_ctx->dl;
-  Vtx *verts_p = runtime_geo_ctx->verts;
-
-  debugf("generate_geometry %u\n", load_amount);
-  unsigned int max_load_amount =
-      MIN((ARRAY_COUNT(runtime_geo_ctx->dl) - 10) / 2,
-          ARRAY_COUNT(runtime_geo_ctx->verts) / 3);
-  if (load_amount > max_load_amount) {
-    debugf("  load_amount clamped to %d\n", max_load_amount);
-    load_amount = max_load_amount;
-  }
-
-  gDPSetCycleType(dl++, G_CYC_1CYCLE);
-  gDPSetRenderMode(dl++, G_RM_OPA_SURF, G_RM_OPA_SURF2);
-  gDPSetCombineMode(dl++, G_CC_PRIMITIVE, G_CC_PRIMITIVE);
-  gDPSetPrimColor(dl++, 0, 0, 255, 255, 255, 255);
-  gSPLoadGeometryMode(dl++, 0);
-
-  float dx = (float)2048 / load_amount;
-  for (int i = 0; i < load_amount; i++) {
-    gSPVertex(dl++, verts_p, 3, 0);
-    gSP1Triangle(dl++, 0, 1, 2, 0);
-
-    int x = -1024 + dx * i;
-
-    push_vtx(&verts_p, (int16_t)(x + dx / 2), -1024);
-    push_vtx(&verts_p, x, 1024);
-    push_vtx(&verts_p, MAX((int16_t)(x + dx), x + 1), 1024);
-  }
-
-  gSPEndDisplayList(dl++);
-}
-
 int main() {
   debug_init_isviewer();
 
@@ -96,16 +74,12 @@ int main() {
   display_init((resolution_t){SCREEN_WIDTH, SCREEN_HEIGHT}, DEPTH_16_BPP, 2,
                GAMMA_NONE, FILTERS_RESAMPLE_ANTIALIAS_DEDITHER);
 
+  dfs_init(DFS_DEFAULT_LOCATION);
+
   struct GfxCtx *gfx_ctx_buf =
       aligned_alloc(alignof(struct GfxCtx),
                     sizeof(struct GfxCtx) * display_get_num_buffers());
   int next_gfx_ctx_i = 0;
-  // We don't necessarily change RuntimeGeoCtx every frame, but it is possible,
-  // hence N-buffering
-  struct RuntimeGeoCtx *runtime_geo_ctx_buf =
-      aligned_alloc(alignof(struct RuntimeGeoCtx),
-                    sizeof(struct RuntimeGeoCtx) * display_get_num_buffers());
-  int next_runtime_geo_ctx_i = 0;
 
   f3dex2_exec_init();
 
@@ -120,34 +94,50 @@ int main() {
   set_mtx_scale(&modelViewMtx, 1.0f / 1024);
   data_cache_hit_writeback(&modelViewMtx, sizeof(modelViewMtx));
 
-  unsigned int load_amount = 1;
-  struct RuntimeGeoCtx *runtime_geo_ctx = NULL;
+  struct {
+    const char *filepath;
+    uint32_t dl;
+  } models[] = {
+#include "../assets/build/Suzanne100K/Suzanne1K.h"
+      {"rom:/Suzanne1K.bin", Suzanne1K_Suzanne_Suzanne_dl},
+#include "../assets/build/Suzanne100K/Suzanne10K.h"
+      {"rom:/Suzanne10K.bin", Suzanne10K_Suzanne_Suzanne_dl},
+#include "../assets/build/Suzanne100K/Suzanne50K.h"
+      {"rom:/Suzanne50K.bin", Suzanne50K_Suzanne_Suzanne_dl},
+  };
+  int i_cur_model = -1;
 
   while (true) {
     joypad_poll();
 
     joypad_buttons_t input = joypad_get_buttons(JOYPAD_PORT_1);
+    int i_next_model = i_cur_model;
     if (input.d_up) {
-      load_amount *= 2;
-      if (load_amount < 1) {
-        load_amount = UINT_MAX;
-      }
-      runtime_geo_ctx = NULL;
+      i_next_model++;
     }
     if (input.d_down) {
-      load_amount /= 2;
-      if (load_amount < 1) {
-        load_amount = 1;
-      }
-      runtime_geo_ctx = NULL;
+      i_next_model--;
     }
 
-    if (runtime_geo_ctx == NULL) {
-      runtime_geo_ctx = &runtime_geo_ctx_buf[next_runtime_geo_ctx_i];
-      next_runtime_geo_ctx_i++;
-      next_runtime_geo_ctx_i %= display_get_num_buffers();
-      generate_geometry(runtime_geo_ctx, load_amount);
+    i_next_model %= ARRAY_COUNT(models);
+    if (i_next_model < 0) {
+      i_next_model += ARRAY_COUNT(models);
     }
+
+    if (i_next_model != i_cur_model) {
+      i_cur_model = i_next_model;
+      i_cur_loaded_model++;
+      i_cur_loaded_model %= ARRAY_COUNT(loaded_models);
+      assert(!loaded_models[i_cur_loaded_model].is_loaded);
+      loaded_models[i_cur_loaded_model].data =
+          asset_load(models[i_cur_model].filepath, NULL);
+      loaded_models[i_cur_loaded_model].n_users = 0;
+      loaded_models[i_cur_loaded_model].is_loaded = true;
+    }
+
+    loaded_models[i_cur_loaded_model].n_users++;
+
+    debugf("%-30s %f fps\n", models[i_cur_model].filepath, display_get_fps());
 
     surface_t *surf = display_get();
 
@@ -160,6 +150,16 @@ int main() {
     gDPSetScissor(work++, G_SC_NON_INTERLACE, 0, 0, SCREEN_WIDTH,
                   SCREEN_HEIGHT);
 
+    // Clear zbuffer
+    gDPSetColorImage(work++, G_IM_FMT_RGBA, G_IM_SIZ_16b, SCREEN_WIDTH,
+                     zbuffer);
+    gDPSetCycleType(work++, G_CYC_FILL);
+    gDPSetRenderMode(work++, G_RM_NOOP, G_RM_NOOP2);
+    gDPSetFillColor(work++,
+                    (GPACK_ZDZ(G_MAXFBZ, 0) << 16) | GPACK_ZDZ(G_MAXFBZ, 0));
+    gDPFillRectangle(work++, 0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1);
+    gDPPipeSync(work++);
+
     gDPSetColorImage(work++, G_IM_FMT_RGBA, G_IM_SIZ_16b, SCREEN_WIDTH,
                      surf->buffer);
 
@@ -171,6 +171,8 @@ int main() {
     gDPFillRectangle(work++, 0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1);
     gDPPipeSync(work++);
 
+    gDPSetDepthImage(work++, zbuffer);
+
     gSPViewport(work++, &vp);
     gSPMatrix(work++, &projMtx, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
     // not sure what the logic is but using 2 for PerspNormalize appears to make
@@ -180,12 +182,16 @@ int main() {
     gSPMatrix(work++, &modelViewMtx,
               G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
 
-    gSPDisplayList(work++, runtime_geo_ctx->dl);
+    gSPSegment(work++, 6, loaded_models[i_cur_loaded_model].data);
+    gSPDisplayList(work++, models[i_cur_model].dl);
 
     gDPFullSync(work++);
 
     gSPEndDisplayList(work++);
 
-    f3dex2_exec_task(gfx_ctx->workBuffer, work, (void *)display_show, surf);
+    gfx_ctx->on_task_finished_arg_data.surf = surf;
+    gfx_ctx->on_task_finished_arg_data.i_used_loaded_model = i_cur_loaded_model;
+    f3dex2_exec_task(gfx_ctx->workBuffer, work, on_task_finished,
+                     &gfx_ctx->on_task_finished_arg_data);
   }
 }

@@ -11,5 +11,8 @@ pushd f3dex2
 pushd f3dex2_ucode
 ./build.sh
 popd
+pushd assets
+make
+popd
 make -j${njobs}
 popd
